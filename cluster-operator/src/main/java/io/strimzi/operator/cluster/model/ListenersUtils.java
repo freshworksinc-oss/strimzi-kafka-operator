@@ -13,6 +13,7 @@ import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerConfigurati
 import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerConfigurationBroker;
 import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationCustom;
 import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationOAuth;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationSaslScramAndPlain;
 import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.api.kafka.model.kafka.listener.NodeAddressType;
 
@@ -29,6 +30,18 @@ public class ListenersUtils {
     /*test*/ static final String BACKWARDS_COMPATIBLE_PLAIN_PORT_NAME = "tcp-clients";
     /*test*/ static final String BACKWARDS_COMPATIBLE_TLS_PORT_NAME = "tcp-clientstls";
     /*test*/ static final String BACKWARDS_COMPATIBLE_EXTERNAL_PORT_NAME = "tcp-external";
+
+    /**
+     * Finds out if any of the listeners has sasl_scram_and_plain authentication enabled
+     *
+     * @param listeners List of all listeners
+     *
+     * @return          True if any listener in the list is using sasl_scram_and_plain authentication. False otherwise.
+     */
+    public static boolean hasListenerWithSaslScramAndPLain(List<GenericKafkaListener> listeners)    {
+        return internalListeners(listeners).stream()
+                .anyMatch(ListenersUtils::isListenerWithSaslScramAndPlain);
+    }
 
     /**
      * Finds out if any of the listeners has OAuth authentication enabled
@@ -68,6 +81,20 @@ public class ListenersUtils {
             return false;
 
         return KafkaListenerAuthenticationCustom.TYPE_CUSTOM.equals(listener.getAuth().getType());
+    }
+
+    /**
+     * Checks whether the listener is using sasl_scram_and_plain authentication
+     *
+     * @param listener  Listener to check
+     *
+     * @return  True if the listener uses sasl_scram_and_plain authentication. False otherwise.
+     */
+    public static boolean isListenerWithSaslScramAndPlain(GenericKafkaListener listener) {
+        if (listener.getAuth() == null || listener.getAuth().getType() == null)
+            return false;
+
+        return KafkaListenerAuthenticationSaslScramAndPlain.SASL_SCRAM_AND_PLAIN.equals(listener.getAuth().getType());
     }
 
     /**
@@ -216,21 +243,32 @@ public class ListenersUtils {
     /**
      * Generates a listener identifier which is used to name the related volumes, volume mounts, etc.
      *
+     * Cluster-stretching fork: returns just {@code listener.getName()} (no {@code -port} suffix)
+     * so that the listener appears in {@code server.properties} as the bare upper-cased name
+     * (e.g. {@code INTERNAL} instead of {@code INTERNAL-9094}). This is desired by downstream
+     * monitoring/tooling that filters JMX metrics on a fixed listener-name label.
+     *
+     * Uniqueness is preserved because {@link ListenersValidator} already enforces that every
+     * listener has a unique {@code name} within the CR.
+     *
      * @param listener  Listener for which the name should be generated
      * @return          Identifier string
      */
     public static String identifier(GenericKafkaListener listener) {
-        return listener.getName() + "-" + listener.getPort();
+        return listener.getName();
     }
 
     /**
-     * Generates a listener identifier which can be used in environment variables
+     * Generates a listener identifier which can be used in environment variables.
+     *
+     * Cluster-stretching fork: returns just the upper-cased {@code listener.getName()} (no
+     * {@code _port} suffix). See {@link #identifier(GenericKafkaListener)}.
      *
      * @param listener  Listener for which the name should be generated
      * @return          Identifier string
      */
     public static String envVarIdentifier(GenericKafkaListener listener) {
-        return listener.getName().toUpperCase(Locale.ENGLISH) + "_" + listener.getPort();
+        return listener.getName().toUpperCase(Locale.ENGLISH);
     }
 
     /**
