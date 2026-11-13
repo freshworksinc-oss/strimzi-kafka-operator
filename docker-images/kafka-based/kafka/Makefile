@@ -23,11 +23,13 @@ clean:
 	touch .tracing-agent.tmp
 
 .thirdparty-libs-$(THIRD_PARTY_LIBS).tmp: ../../artifacts/binaries/kafka-thirdparty-libs/$(THIRD_PARTY_LIBS).zip
+	rm -rf tmp/thirdparty-libs-$(THIRD_PARTY_LIBS)
 	test -d tmp/thirdparty-libs-$(THIRD_PARTY_LIBS) || mkdir -p tmp/thirdparty-libs-$(THIRD_PARTY_LIBS)
 	unzip -qoj ../../artifacts/binaries/kafka-thirdparty-libs/$(THIRD_PARTY_LIBS).zip -d tmp/thirdparty-libs-$(THIRD_PARTY_LIBS)
 	touch .thirdparty-libs-$(THIRD_PARTY_LIBS).tmp
 
 .thirdparty-libs-cc.tmp: ../../artifacts/binaries/kafka-thirdparty-libs/cc.zip
+	rm -rf tmp/cc
 	test -d tmp/cc || mkdir -p tmp/cc
 	unzip -qo ../../artifacts/binaries/kafka-thirdparty-libs/cc.zip -d tmp/cc
 	touch .thirdparty-libs-cc.tmp
@@ -35,6 +37,10 @@ clean:
 .kafka-$(KAFKA_VERSION).tmp: ../../artifacts/binaries/kafka/archives/kafka_2.13-$(KAFKA_VERSION).tgz
 	test -d tmp/$(KAFKA_VERSION) || mkdir -p tmp/$(KAFKA_VERSION)
 	tar xvfz ../../artifacts/binaries/kafka/archives/kafka_2.13-$(KAFKA_VERSION).tgz -C tmp/$(KAFKA_VERSION) --strip-components=1
+ifeq ($(KAFKA_VERSION),4.3.2)
+	# Remove bundled jars that are replaced by patched versions from the 4.3.2 third-party libs overlay
+	find tmp/$(KAFKA_VERSION)/libs \( -name 'jetty-*.jar' -o -name 'jline-*.jar' -o -name 'lz4-java-*.jar' -o -name 'guava-*.jar' -o -name 'jackson-core-*.jar' -o -name 'jackson-databind-*.jar' \) -delete
+endif
 	touch .kafka-$(KAFKA_VERSION).tmp
 
 .kafka-$(KAFKA_VERSION)-ignorelist.tmp: ../../artifacts/binaries/kafka/$(KAFKA_VERSION).ignorelist

@@ -1,0 +1,19 @@
+# Sample mTLS client user for listener clientd (9093). Edit topic/group names and ACLs as needed.
+# Principal seen by Kafka: User:CN=app-mtls
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: app-mtls
+  namespace: strimzi-kraft-test
+  labels:
+    strimzi.io/cluster: kafkadev
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: my-topic, patternType: literal }
+        operations: [Read, Write, Describe]
+      - resource: { type: group, name: my-group, patternType: literal }
+        operations: [Read]

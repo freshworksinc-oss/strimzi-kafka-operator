@@ -1,4 +1,28 @@
 #####
+# Build Kafka Exporter from source to get a patched Go standard library
+#####
+ARG RF_GOLANG_IMAGE=396420358689.dkr.ecr.us-east-1.amazonaws.com/rfcurated:golang-1.27.3-alpine3.24-fips-rfcurated-20261110
+FROM ${RF_GOLANG_IMAGE} AS exporter-build
+
+USER root
+
+ARG KAFKA_EXPORTER_VERSION=1.11.0
+ARG KAFKA_EXPORTER_SRC_SHA256=e3366dba6da40559c36f9becc45075c594265815b96da181710bc00c0b0f29a9
+# The RapidFort FIPS Go image (Microsoft build of Go 1.27.3) only allows its bundled toolchain
+ARG GO_TOOLCHAIN=local
+# Patched klauspost/compress (zstd) to fix a CVE in the version pinned by kafka_exporter
+ARG ZSTD_VERSION=1.20.2
+
+RUN set -ex; \
+    wget -q -O /tmp/ke.tgz https://github.com/danielqsj/kafka_exporter/archive/refs/tags/v${KAFKA_EXPORTER_VERSION}.tar.gz; \
+    echo "${KAFKA_EXPORTER_SRC_SHA256}  /tmp/ke.tgz" | sha256sum -c -; \
+    mkdir /src && tar xzf /tmp/ke.tgz -C /src --strip-components=1; cd /src; \
+    export GOTOOLCHAIN=${GO_TOOLCHAIN} GOFLAGS=-mod=mod; \
+    go get github.com/klauspost/compress@v${ZSTD_VERSION}; \
+    MS_GO_NOSYSTEMCRYPTO=1 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/kafka_exporter .; \
+    cp LICENSE /out/LICENSE
+
+#####
 # Build the helper container image for downloading prerequisites
 #####
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS downloader
@@ -11,47 +35,6 @@ RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y \
             tar \
             # gzip is used to unpack the downloaded binaries here in the Dockerfile \
             gzip
-
-#####
-# Get Kafka Exporter
-#####
-ENV KAFKA_EXPORTER_HOME=/opt/kafka-exporter
-ENV KAFKA_EXPORTER_VERSION=1.11.0
-ENV KAFKA_EXPORTER_CHECKSUM_AMD64="8836e92827132dd232010a1c53fc7e3a815b4c9e47b8b5791957c43ad1a839035482ea69aca42891e626b6a96bcd791cc863cc64315ce519d0ea4604090a3a93  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_ARM64="8c5d3eadf086dea24c49962ef058a61b8457ec52b6173834b3b311066914874235de439aa2e97ad6e59bc95bba577bc3ebd663edc03afaa4440551b451d69f63  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_PPC64LE="6a25e0b953dc3663b3439bf1f17bc525e7735d2de6cddda36e90f4cf3db8ea541f5e1b6647db678a61014e4ce216aa96ebd909c277a759c0cb1e4de31a565599  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_S390X="876423ca7513ada825a17e657662bee1644b47471e61cc13758ed6296c32b34492b301c41e287a40ce674dd5cd71f43dc47bdac674484d87db14296221c4bb0d kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz"
-
-RUN set -ex; \
-    if [[ "${TARGETOS}/${TARGETARCH}" = "linux/arm64" ]]; then \
-        curl -LO https://github.com/danielqsj/kafka_exporter/releases/download/v${KAFKA_EXPORTER_VERSION}/kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz; \
-        echo $KAFKA_EXPORTER_CHECKSUM_ARM64 > kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz.sha512; \
-        sha512sum -c kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz.sha512; \
-        mkdir $KAFKA_EXPORTER_HOME; \
-        tar xvfz kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz -C $KAFKA_EXPORTER_HOME --strip-components=1; \
-        rm -f kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz*; \
-    elif [[ "${TARGETOS}/${TARGETARCH}" = "linux/ppc64le" ]]; then \
-        curl -LO https://github.com/danielqsj/kafka_exporter/releases/download/v${KAFKA_EXPORTER_VERSION}/kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz; \
-        echo $KAFKA_EXPORTER_CHECKSUM_PPC64LE > kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz.sha512; \
-        sha512sum -c kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz.sha512; \
-        mkdir $KAFKA_EXPORTER_HOME; \
-        tar xvfz kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz -C $KAFKA_EXPORTER_HOME --strip-components=1; \
-        rm -f kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz*; \
-    elif [[ "${TARGETOS}/${TARGETARCH}" = "linux/s390x" ]]; then \
-        curl -LO https://github.com/danielqsj/kafka_exporter/releases/download/v${KAFKA_EXPORTER_VERSION}/kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz; \
-        echo $KAFKA_EXPORTER_CHECKSUM_S390X > kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz.sha512; \
-        sha512sum -c kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz.sha512; \
-        mkdir $KAFKA_EXPORTER_HOME; \
-        tar xvfz kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz -C $KAFKA_EXPORTER_HOME --strip-components=1; \
-        rm -f kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz*; \
-    else \
-        curl -LO https://github.com/danielqsj/kafka_exporter/releases/download/v${KAFKA_EXPORTER_VERSION}/kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz; \
-        echo $KAFKA_EXPORTER_CHECKSUM_AMD64 > kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz.sha512; \
-        sha512sum -c kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz.sha512; \
-        mkdir $KAFKA_EXPORTER_HOME; \
-        tar xvfz kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz -C $KAFKA_EXPORTER_HOME --strip-components=1; \
-        rm -f kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz*; \
-    fi
 
 #####
 # Get Prometheus JMX Exporter
@@ -88,21 +71,19 @@ LABEL name='kafka' \
     summary="Kafka ${KAFKA_VERSION} image of the Strimzi Kafka Operator project." \
     description="Kafka image used by the Strimzi Kafka Operator to run Kafka ${KAFKA_VERSION} clusters."
 
-RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y \
-            # net-tools are needed for the health check probes (netstat) \
-            net-tools \
-            # hostname is used by Strimzi scripts to determine the Kafka node ID \
-            hostname  \
-            # xargs is used by Kafka's own shell scripts \
-            # find and xargs are also used in our Kafka Connect Build Dockerfiles \
-            findutils \
-            # Tar is also used in our Kafka Connect Build Dockerfiles \
-            tar \
-            # gzip is also used in our Kafka Connect Build Dockerfiles \
-            gzip \
-            # unzip is used in our Kafka Connect Build Dockerfiles \
-            unzip \
-    && microdnf clean all -y
+# net-tools: netstat is used by the health check probes; hostname: used by scripts to find the node ID;
+# findutils/tar/gzip/unzip: used by Kafka scripts and our Kafka Connect Build Dockerfiles.
+# The security upgrade must run after the install in the same layer, otherwise the install reverts systemd-libs.
+RUN dnf -y install --setopt=install_weak_deps=False --allowerasing \
+            coreutils gettext net-tools unzip hostname findutils tar gzip \
+    && dnf -y upgrade --releasever=latest curl-minimal libcurl-minimal systemd-libs krb5-libs \
+    && dnf clean all && rm -rf /var/cache/dnf
+
+# Hardening: Kafka needs no Python, dnf or gnupg
+RUN rpm -qa 'python3*' 'rf-python3*' 'dnf*' 'yum*' 'libdnf*' 'libcomps*' 'libmodulemd*' 2>/dev/null \
+        | xargs -r rpm -e --nodeps \
+    ; (rpm -e --nodeps gnupg2-minimal 2>/dev/null || true); \
+    rm -rf /var/cache/dnf /var/lib/dnf /etc/dnf /usr/lib/python3*
 
 # Add kafka user with UID 1001
 # The user is in the group 0 to have access to the mounted volumes and storage
@@ -123,7 +104,7 @@ RUN mkdir $KAFKA_HOME/plugins
 # Copy Kafka Exporter from the downloader stage and the helper scripts from local filesystem
 #####
 ENV KAFKA_EXPORTER_HOME=/opt/kafka-exporter
-COPY --from=downloader $KAFKA_EXPORTER_HOME/kafka_exporter $KAFKA_EXPORTER_HOME/kafka_exporter
+COPY --from=exporter-build /out/kafka_exporter $KAFKA_EXPORTER_HOME/kafka_exporter
 COPY ./exporter-scripts $KAFKA_EXPORTER_HOME
 
 #####

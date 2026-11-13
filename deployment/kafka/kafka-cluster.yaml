@@ -1,0 +1,229 @@
+# Kafka 4.3.2 cluster managed by Strimzi 1.3.1 (KRaft only; ZooKeeper no longer exists in this Strimzi/Kafka version).
+# Modelled on central-k8s-deployments/strimzi-helm-chart/env/dev/use1.
+#
+# NOTE: the `sasl_scram_and_plain` listener authentication type and the FWSS_* init container are custom
+# Freshworks patches that are NOT present on release-1.3.x. Listeners below use upstream `scram-sha-512`.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: controller
+  namespace: strimzi-kraft-test
+  labels:
+    strimzi.io/cluster: kafkadev
+spec:
+  replicas: 3
+  roles:
+    - controller
+  # CPU requests are lower than limits on purpose (Burstable QoS): nodes with the kubelet static CPU manager
+  # policy otherwise reject Guaranteed pods with integer CPUs (SMTAlignmentError) when free cores run short.
+  resources:
+    requests:
+      memory: 4Gi
+      cpu: 500m
+    limits:
+      memory: 4Gi
+      cpu: "2"
+  jvmOptions:
+    -Xms: 2g
+    -Xmx: 2g
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 20Gi
+        class: ebs-sc-kafka
+        deleteClaim: true
+        kraftMetadata: shared
+  template:
+    pod:
+      terminationGracePeriodSeconds: 300
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: strimzi.io/pool-name
+                    operator: In
+                    values:
+                      - controller
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/pool-name: controller
+    kafkaContainer:
+      securityContext:
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: broker
+  namespace: strimzi-kraft-test
+  labels:
+    strimzi.io/cluster: kafkadev
+spec:
+  replicas: 3
+  roles:
+    - broker
+  resources:
+    requests:
+      memory: 8Gi
+      cpu: "1"
+    limits:
+      memory: 8Gi
+      cpu: "4"
+  jvmOptions:
+    -Xms: 4g
+    -Xmx: 4g
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 100Gi
+        class: ebs-sc-kafka
+        deleteClaim: true
+        kraftMetadata: shared
+  template:
+    pod:
+      metadata:
+        annotations:
+          prometheus.io/path: /metrics
+          prometheus.io/port: "9404"
+          prometheus.io/scrape: "true"
+      terminationGracePeriodSeconds: 300
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: strimzi.io/component-type
+                    operator: In
+                    values:
+                      - kafka
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/pool-name: broker
+    kafkaContainer:
+      securityContext:
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+    initContainer:
+      securityContext:
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafkadev
+  namespace: strimzi-kraft-test
+  labels:
+    app.kubernetes.io/part-of: centralv2-kafka-platform
+spec:
+  kafka:
+    version: 4.3.2
+    metadataVersion: 4.3-IV0
+    image: 642367526092.dkr.ecr.us-east-1.amazonaws.com/central2.0/kafka_broker:1.3.1-kafka-4.3.2-fips.6
+    readinessProbe:
+      initialDelaySeconds: 30
+      timeoutSeconds: 15
+      failureThreshold: 5
+    livenessProbe:
+      initialDelaySeconds: 30
+      timeoutSeconds: 15
+      failureThreshold: 5
+    logging:
+      type: external
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-logging-config
+          key: log4j2.properties
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+    rack:
+      topologyKey: topology.kubernetes.io/zone
+    brokerRackInitImage: 642367526092.dkr.ecr.us-east-1.amazonaws.com/central2.0/k8s_operator:1.3.1-fips.6
+    listeners:
+      - name: clientc
+        port: 9092
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+      - name: clientd
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: tls
+      - name: internal
+        port: 9094
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+      - name: clientf
+        port: 9095
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+    authorization:
+      type: simple
+      superUsers:
+        - strimzi-admin-user
+        - admin
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      num.partitions: 3
+      num.network.threads: 6
+      num.io.threads: 8
+      num.recovery.threads.per.data.dir: 8
+      num.replica.fetchers: 4
+      replica.fetch.max.bytes: 10485760
+      replica.fetch.response.max.bytes: 10485760
+      message.max.bytes: 10485760
+      replica.lag.time.max.ms: 10000
+      log.segment.bytes: 1073741824
+      log.retention.check.interval.ms: 300000
+      log.retention.ms: 1800000
+      controlled.shutdown.enable: true
+      delete.topic.enable: true
+      auto.create.topics.enable: false
+      unclean.leader.election.enable: false
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+  kafkaExporter:
+    image: 642367526092.dkr.ecr.us-east-1.amazonaws.com/central2.0/kafka_broker:1.3.1-kafka-4.3.2-fips.6
+    topicRegex: ".*"
+    groupRegex: ".*"

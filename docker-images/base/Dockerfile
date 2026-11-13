@@ -1,3 +1,5 @@
+ARG RF_BASE_IMAGE=396420358689.dkr.ecr.us-east-1.amazonaws.com/rfcurated:rfal-al23-fips-rfcurated-20261110
+
 #####
 # Build the helper container image for downloading prerequisites
 #####
@@ -37,7 +39,7 @@ RUN set -ex; \
 #####
 # Build the main container image
 #####
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM ${RF_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source='https://github.com/strimzi/strimzi-kafka-operator'
 
@@ -55,18 +57,28 @@ LABEL name='base' \
 
 USER root
 
-RUN microdnf update -y \
-    && microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y  \
-            # Needed to run Java applications \
-            java-${JAVA_VERSION}-openjdk-headless \
-            # Needed to work with TLS certificates in our shell scripts as well as from our own Java code \
-            openssl \
-            # Needed to add non-root users to our container images \
-            shadow-utils \
-    && microdnf reinstall -y tzdata \
-    && microdnf clean all -y
+# RapidFort FIPS Amazon Linux 2023 base (ships rf-openssl), plus Java and the tools needed by our scripts
+RUN dnf -y update \
+    && dnf -y install --setopt=install_weak_deps=False \
+            java-${JAVA_VERSION}-amazon-corretto-headless \
+            shadow-utils tar gzip findutils \
+    && dnf clean all && rm -rf /var/cache/dnf
 
-ENV JAVA_HOME=/usr/lib/jvm/jre-${JAVA_VERSION}
+# Pull the latest security fixes from the newest AL2023 release repo (the pinned repo lags)
+RUN dnf -y upgrade --releasever=latest \
+            curl-minimal libcurl-minimal \
+            systemd-libs krb5-libs ca-certificates \
+            system-release amazon-linux-repo-cdn \
+            java-${JAVA_VERSION}-amazon-corretto-headless \
+    && dnf clean all && rm -rf /var/cache/dnf \
+    && curl --version | head -1 \
+    # The newer ca-certificates package ships /etc/ssl/openssl.cnf -> /etc/pki/tls/openssl.cnf, while the RapidFort
+    # openssl keeps /etc/pki/tls/openssl.cnf -> /etc/ssl/openssl.cnf. That is a symlink loop which breaks the openssl
+    # CLI (used by the User Operator and Cluster Operator for certificate generation). Restore the RapidFort layout.
+    && ln -sfn openssl.cnf.non-strict-140-3 /etc/ssl/openssl.cnf \
+    && openssl req -new -batch -nodes -newkey rsa:2048 -keyout /dev/null -subj /CN=t >/dev/null
+
+ENV JAVA_HOME=/usr/lib/jvm/java-${JAVA_VERSION}-amazon-corretto
 
 #####
 # Copy Tini from the downloader stage

@@ -12,6 +12,10 @@ clean:
 # COPYed in the Dockerfile, so can delete tmp on exit
 .INTERMEDIATE: tmp
 
+# Always start from an empty tmp so unzip -o cannot leave stale jars from previous builds
+.clean-tmp:
+	rm -rf tmp .topic-operator.tmp .user-operator.tmp .kafka-init.tmp .cluster-operator.tmp
+
 .topic-operator.tmp: $(topic_operator_dist)
 	test -d tmp || mkdir tmp
 	unzip -qo $(topic_operator_dist) -d tmp
@@ -32,7 +36,7 @@ clean:
 	unzip -qo $(cluster_operator_dist) -d tmp
 	touch .cluster-operator.tmp
 
-docker_build: .topic-operator.tmp .user-operator.tmp .kafka-init.tmp .cluster-operator.tmp docker_build_default
+docker_build: .clean-tmp .topic-operator.tmp .user-operator.tmp .kafka-init.tmp .cluster-operator.tmp docker_build_default
 	# Pull dependencies first
 
 include ../../Makefile.docker

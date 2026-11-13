@@ -1,0 +1,23 @@
+# StorageClass used by the Kafka node pools (`class: ebs-sc-kafka`). StorageClasses are cluster-scoped.
+# Based on the staging `ebs-sc-kafka`, with gp3 baseline performance and reclaimPolicy Delete for the test cluster.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-sc-kafka
+  labels:
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: central-kafka-platform
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+  fsType: xfs
+  tagSpecification_1: "own:team=central"
+  tagSpecification_2: "own:primary=dbaas-central@freshworks.com"
+  tagSpecification_3: "svc:name=kafka"
+  tagSpecification_4: "svc:theme=non-ai"
+mountOptions:
+  - noatime
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer

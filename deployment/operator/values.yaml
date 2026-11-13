@@ -1,0 +1,91 @@
+# Helm values for the Strimzi cluster operator 1.3.1 (FIPS build).
+# Chart: ../../packaging/helm-charts/helm3/strimzi-kafka-operator (appVersion 1.3.1)
+# Modelled on central-k8s-deployments/operator-helm-charts/env/dev/values.yaml.
+
+replicas: 2
+watchNamespaces: []
+watchAnyNamespace: true
+
+fullReconciliationIntervalMs: 120000
+operationTimeoutMs: 300000
+kubernetesServiceDnsDomain: cluster.local
+logLevel: ${env:STRIMZI_LOG_LEVEL:-INFO}
+
+leaderElection:
+  enable: true
+
+# All images come from the Freshworks ECR. Because an explicit `tag` is set, the chart uses it as-is for every
+# Kafka version in STRIMZI_KAFKA_IMAGES (only 4.3.2 is deployed, so that is fine).
+defaultImageRegistry: 642367526092.dkr.ecr.us-east-1.amazonaws.com
+defaultImageRepository: central2.0
+defaultImageTag: 1.3.1-fips.6
+
+image:
+  registry: 642367526092.dkr.ecr.us-east-1.amazonaws.com
+  repository: central2.0
+  name: k8s_operator
+  tag: "1.3.1-fips.6"
+
+topicOperator:
+  image: &operatorImage
+    registry: 642367526092.dkr.ecr.us-east-1.amazonaws.com
+    repository: central2.0
+    name: k8s_operator
+    tag: "1.3.1-fips.6"
+userOperator:
+  image: *operatorImage
+kafkaInit:
+  image: *operatorImage
+
+kafka:
+  image: &kafkaImage
+    registry: 642367526092.dkr.ecr.us-east-1.amazonaws.com
+    repository: central2.0
+    name: kafka_broker
+    tag: "1.3.1-kafka-4.3.2-fips.6"
+kafkaConnect:
+  image: *kafkaImage
+kafkaExporter:
+  image: *kafkaImage
+kafkaMirrorMaker2:
+  image: *kafkaImage
+cruiseControl:
+  image: *kafkaImage
+
+# Bridge is not part of this deployment; keep the chart default image.
+kafkaBridge:
+  image:
+    registry: ""
+    repository: ""
+    name: kafka-bridge
+    tag: 1.2.1
+
+resources:
+  limits:
+    memory: 512Mi
+    cpu: "1"
+  requests:
+    memory: 512Mi
+    cpu: 200m
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: name
+              operator: In
+              values:
+                - strimzi-cluster-operator
+        topologyKey: kubernetes.io/hostname
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+rbac:
+  create: yes
+serviceAccountCreate: yes
+serviceAccount: strimzi-cluster-operator
+
+generateNetworkPolicy: false
